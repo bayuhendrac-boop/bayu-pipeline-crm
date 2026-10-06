@@ -350,8 +350,8 @@ function listBlock(key) {
 function renderModule(t) {
     const c = $('main-content'); if (!c) return;
     const scroll = c.scrollTop;
-    if (M[t]) c.innerHTML = listBlock(t);
-    else if (t === 'accounts') c.innerHTML = `<div class="space-y-8">${listBlock('accounts')}${listBlock('pics')}</div>`;
+    if (t === 'accounts') c.innerHTML = `<div class="space-y-8">${listBlock('accounts')}${listBlock('pics')}</div>`;
+    else if (M[t]) c.innerHTML = listBlock(t);
     else if (t === 'dashboard') renderDashboard(c);
     else if (t === 'pipeline') renderPipeline(c);
     else if (t === 'exposure') renderExposure(c);
@@ -484,7 +484,7 @@ function aiContext() {
         prioritas: a.rows.slice(0, 15).map(r => ({ nama: r.o.name, akun: r.acc, stage: r.o.stage, nilai: r.o.commercialValue, probabilitas: r.o.probability, health: r.m.health, exposure: r.m.exposureScore, hari_ke_close: r.days, hari_tanpa_activity: r.idle, sinyal: r.m.signals.map(s => s.text) })), temuan: a.ins.map(i => i.t) };
 }
 async function askGemini(question, context, key) {
-    const model = lsGet('bayu_gemini_model') || 'gemini-2.5-flash-lite';
+    const model = lsGet('bayu_gemini_model') || 'gemini-3.5-flash-lite';
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -531,7 +531,7 @@ function renderAI(c) {
                 <p class="mt-2">Isi <b>API key Gemini</b> dari aistudio.google.com/apikey. Key hanya disimpan di browser ini (tidak masuk ke GitHub atau Firebase) dan dikirim langsung ke Google. Ringkasan pipeline (nama deal, akun, nilai) ikut terkirim. Jangan isi di komputer bersama. Opsional: endpoint proxy sendiri, dipakai kalau key Gemini kosong.</p>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
                     <input id="ai-gkey" type="password" autocomplete="off" value="${esc(lsGet('bayu_gemini_key'))}" placeholder="API key Gemini (AIza...)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2">
-                    <input id="ai-gmodel" value="${esc(lsGet('bayu_gemini_model'))}" placeholder="Model (default gemini-2.5-flash-lite)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                    <input id="ai-gmodel" value="${esc(lsGet('bayu_gemini_model'))}" placeholder="Model (default gemini-3.5-flash-lite)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm">
                     <input id="ai-endpoint" value="${esc(aiEndpoint())}" placeholder="Endpoint proxy (opsional)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2">
                     <button onclick="aiSaveSettings()" class="px-3 py-2 border border-slate-300 rounded-lg font-semibold hover:bg-slate-50">Simpan</button>
                 </div></details></div>
