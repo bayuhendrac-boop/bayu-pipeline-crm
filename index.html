@@ -467,17 +467,44 @@ function aiAnalyze() {
     else if (!ins.length) ins.push({ l: 'success', t: 'Tidak ada isu kritis. Pertahankan ritme follow-up.' });
     return { rows, ins, totalW, wonValue: won.reduce((s, o) => s + Number(o.commercialValue || 0), 0), openCount: open.length };
 }
-const aiEndpoint = () => { try { return localStorage.getItem('bayu_ai_endpoint') || ''; } catch (e) { return ''; } };
+const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} };
+const aiEndpoint = () => lsGet('bayu_ai_endpoint');
 const aiShow = t => { const el = $('ai-output'); if (el) el.textContent = t; };
-function aiSaveEndpoint() { const v = $('ai-endpoint').value.trim(); try { localStorage.setItem('bayu_ai_endpoint', v); } catch (e) {} aiShow(v ? 'Endpoint AI tersimpan.' : 'Endpoint dihapus. Mode lokal aktif.'); }
+const AI_SYSTEM = 'Kamu adalah penasihat penjualan untuk tim sales di Indonesia (BAYU CRM). Jawab dalam Bahasa Indonesia, ringkas, praktis, dan berbasis data pipeline yang diberikan. Berikan prioritas jelas dan langkah konkret (siapa, apa, kapan). Jangan mengarang data yang tidak ada di konteks; jika data kurang, katakan apa yang perlu dilengkapi. Hari ke-close negatif berarti sudah lewat target.';
+function aiSaveSettings() {
+    lsSet('bayu_gemini_key', $('ai-gkey').value.trim());
+    lsSet('bayu_gemini_model', $('ai-gmodel').value.trim());
+    lsSet('bayu_ai_endpoint', $('ai-endpoint').value.trim());
+    aiShow('Pengaturan AI tersimpan di browser ini.' + (lsGet('bayu_gemini_key') ? ' Mode: Gemini langsung.' : aiEndpoint() ? ' Mode: endpoint.' : ' Mode: analisa lokal saja.'));
+}
+function aiContext() {
+    const a = aiAnalyze();
+    return { tanggal: todayLocal(), opportunity_terbuka: a.openCount, forecast_weighted: Math.round(a.totalW), nilai_won: Math.round(a.wonValue),
+        prioritas: a.rows.slice(0, 15).map(r => ({ nama: r.o.name, akun: r.acc, stage: r.o.stage, nilai: r.o.commercialValue, probabilitas: r.o.probability, health: r.m.health, exposure: r.m.exposureScore, hari_ke_close: r.days, hari_tanpa_activity: r.idle, sinyal: r.m.signals.map(s => s.text) })), temuan: a.ins.map(i => i.t) };
+}
+async function askGemini(question, context, key) {
+    const model = lsGet('bayu_gemini_model') || 'gemini-2.5-flash-lite';
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+            systemInstruction: { parts: [{ text: AI_SYSTEM }] },
+            contents: [{ role: 'user', parts: [{ text: `DATA PIPELINE (JSON):\n${JSON.stringify(context)}\n\nPERTANYAAN: ${question}` }] }],
+            generationConfig: { maxOutputTokens: 1000 }
+        })
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error((d.error && d.error.message) || 'HTTP ' + res.status);
+    return (((d.candidates || [])[0] || {}).content || { parts: [] }).parts.map(p => p.text || '').join('') || 'Tidak ada jawaban dari model.';
+}
 async function aiAsk(question) {
-    const ep = aiEndpoint();
-    if (!ep) { aiShow('Endpoint AI belum diatur. Analisa lokal di atas tetap aktif. Isi endpoint (Pengaturan endpoint AI) untuk jawaban AI penuh.'); return; }
+    const gk = lsGet('bayu_gemini_key'), ep = aiEndpoint();
+    if (!gk && !ep) { aiShow('AI belum diatur. Analisa lokal di atas tetap aktif. Buka "Pengaturan AI" di bawah, isi API key Gemini, lalu Simpan.'); return; }
     aiShow('Menganalisa...');
     try {
-        const a = aiAnalyze();
-        const context = { tanggal: todayLocal(), opportunity_terbuka: a.openCount, forecast_weighted: Math.round(a.totalW), nilai_won: Math.round(a.wonValue),
-            prioritas: a.rows.slice(0, 15).map(r => ({ nama: r.o.name, akun: r.acc, stage: r.o.stage, nilai: r.o.commercialValue, probabilitas: r.o.probability, health: r.m.health, exposure: r.m.exposureScore, hari_ke_close: r.days, hari_tanpa_activity: r.idle, sinyal: r.m.signals.map(s => s.text) })), temuan: a.ins.map(i => i.t) };
+        const context = aiContext();
+        if (gk) { aiShow(await askGemini(question, context, gk)); return; }
         const res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await currentUser.getIdToken() }, body: JSON.stringify({ question, context }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const d = await res.json(); aiShow(d.text || JSON.stringify(d));
@@ -500,9 +527,14 @@ function renderAI(c) {
             <textarea id="ai-question" rows="2" placeholder="Contoh: Deal mana yang paling berpotensi closing bulan ini dan apa yang harus saya lakukan?" class="${IC}"></textarea>
             <button onclick="aiAskBox()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-sm">Analisa</button>
             <pre id="ai-output" class="whitespace-pre-wrap text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-3 min-h-[60px] font-sans">Jawaban AI akan tampil di sini.</pre>
-            <details class="text-xs text-slate-600"><summary class="cursor-pointer font-semibold">Pengaturan endpoint AI</summary>
-                <p class="mt-2">Arahkan ke Cloud Function/proxy milikmu yang memegang API key dan memverifikasi token Firebase. Ringkasan pipeline (nama deal, akun, nilai) dikirim ke endpoint tersebut.</p>
-                <div class="flex gap-2 mt-2"><input id="ai-endpoint" value="${esc(aiEndpoint())}" placeholder="https://REGION-PROJECT.cloudfunctions.net/bayuAI" class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"><button onclick="aiSaveEndpoint()" class="px-3 py-2 border border-slate-300 rounded-lg font-semibold hover:bg-slate-50">Simpan</button></div></details></div>
+            <details open class="text-xs text-slate-600"><summary class="cursor-pointer font-semibold">Pengaturan AI</summary>
+                <p class="mt-2">Isi <b>API key Gemini</b> dari aistudio.google.com/apikey. Key hanya disimpan di browser ini (tidak masuk ke GitHub atau Firebase) dan dikirim langsung ke Google. Ringkasan pipeline (nama deal, akun, nilai) ikut terkirim. Jangan isi di komputer bersama. Opsional: endpoint proxy sendiri, dipakai kalau key Gemini kosong.</p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                    <input id="ai-gkey" type="password" autocomplete="off" value="${esc(lsGet('bayu_gemini_key'))}" placeholder="API key Gemini (AIza...)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2">
+                    <input id="ai-gmodel" value="${esc(lsGet('bayu_gemini_model'))}" placeholder="Model (default gemini-2.5-flash-lite)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                    <input id="ai-endpoint" value="${esc(aiEndpoint())}" placeholder="Endpoint proxy (opsional)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2">
+                    <button onclick="aiSaveSettings()" class="px-3 py-2 border border-slate-300 rounded-lg font-semibold hover:bg-slate-50">Simpan</button>
+                </div></details></div>
     </div>`;
 }
 </script>
